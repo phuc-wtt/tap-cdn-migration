@@ -1,5 +1,8 @@
 #!/usr/bin/perl
 
+# NOTE
+# js: second round for non-file, ex: parenttown-prod/community-web/
+#
 # Flags
 use strict;
 use warnings;
@@ -12,13 +15,15 @@ use feature qw(say);
 use Path::Tiny qw(path);
 
 # Config vars
-my @all_entry;
+my $is_write = 0;
 my $exclude_dir = '(node_modules|\.git|build)';
 my $s3_regex = 's3\.theasianparent\.com';
 my $bunny = 'static.cdntap.com';
 my $target_dir_relative_path = '../community-web';
-my $helper_function_name = 'helperFunctionnnnn';
+my $helper_function_name = 'console.log';
 
+# Global varsj
+my @all_entry;
 my @log;
 
 find(
@@ -96,14 +101,14 @@ foreach (@js_entry) {
     my $quote = substr($file_content, $first - 1, ($second - $first + 1));
     my @in_quote_matches = $quote =~ m{($s3_regex/.*?\w+\.{1}\w+\b)}g;
     foreach (@in_quote_matches) {
-      my $to_replace = parse_to_helper_function(get_to_replace($_));
+      my $to_replace = parse_to_helper_function(parse_optimize_static($_));
       push_pair_to_arr($js_match_replace_pair, $temp, $_, undef);
       push_pair_to_arr($js_match_replace_pair, $temp, undef, $to_replace);
     }
   }
-
   local $/ = "\n";
-  #Actually snr helper function
+
+  # JS: replace in `__` to helper func
   push(@log, '', $_);
   my $js_file = path($_);
   my $js_file_content = $js_file->slurp_utf8;
@@ -112,9 +117,13 @@ foreach (@js_entry) {
     my $to_replace = $_->[1];
     push(@log, "[Match]:    $match");
     push(@log, "[Replace]:  $to_replace");
-    $js_file_content =~ s|\Q$match|$to_replace|;
+    $js_file_content =~ s/\$\{("|')(https:\/\/)?\Q$match\E("|')\}/\$\{$to_replace\}/g;             # match ${"__"}
+    $js_file_content =~ s/(\?.*?:.*?)("|')(https:\/\/)?\Q$match\E("|')/$1$to_replace/g;      # match ternary
+    $js_file_content =~ s|(https://)?\Q$match\E|\$\{$to_replace\}|;             # match remain
   }
-  # $file->spew_utf8( $js_file_content );
+  # JS: replace static to helper funcj
+  snr_js_static($js_file_content);
+  if ($is_write) {$js_file->spew_utf8( $js_file_content );}
 
 }
 
@@ -134,7 +143,7 @@ foreach my $static_files (@static_entry) {
     my $file = path($_);
     my $file_content = $file->slurp_utf8;
     snr_static($file_content);
-    # $file->spew_utf8( $file_content );
+    if ($is_write) {$file->spew_utf8( $file_content );}
   }
 };
 
@@ -147,7 +156,7 @@ sub snr_static {
     # then check if optimized
     if ($match =~ m|cdn-cgi/image/|) {
       # optimized: process the matched
-      $to_replace = get_to_replace($match);
+      $to_replace = parse_optimize_static($match);
       # snr matched to to_replace
       $_[0] =~ s|$match|$to_replace|g;
     } else {
@@ -156,12 +165,40 @@ sub snr_static {
     }
     push(@log, "[Match]:    $match");
     push(@log, "[Replace]:  $to_replace");
-    $_[0] =~ s|\Q$match|$to_replace|g;
+    $_[0] =~ s|(https://)?\Q$match|$1$to_replace|g;
   }
   return $_[0]
 }
 
-sub get_to_replace {
+sub snr_js_static { # copy from snr_static
+  # get all matches
+  my @s3_match = $_[0] =~ m|($s3_regex/.*?\w+\.{1}\w+\b)|g;
+  foreach my $match (@s3_match) {
+    my $to_replace;
+    # then check if optimized
+    if ($match =~ m|cdn-cgi/image/|) {
+      # optimized: process the matched
+      $to_replace = parse_optimize_static($match);
+      # snr matched to to_replace
+      $to_replace = parse_to_helper_function($to_replace);
+      #$_[0] =~ s|$match|$to_replace|g;
+    } else {
+      $to_replace = $match;
+      $to_replace =~ s|$s3_regex|$bunny|;
+    }
+    push(@log, "[Match]:    $match");
+    push(@log, "[Replace]:  $to_replace");
+    $to_replace = parse_to_helper_function($to_replace);
+    # match patterns
+    $_[0] =~ s/(\b\w+\b)=\{?("|')(https:\/\/)?\Q$match\E("|')\}?/$1={$to_replace}/g;
+    $_[0] =~ s/=\s?("|'|`)(https:\/\/)?\Q$match\E("|'|`)/= $to_replace/g;
+    $_[0] =~ s/:\s?("|'|`)(https:\/\/)?\Q$match\E("|'|`)/: $to_replace/g;
+    $_[0] =~ s/return\s?("|'|`)(https:\/\/)?\Q$match\E("|'|`)/return $to_replace/g;
+  }
+  return $_[0]
+}
+
+sub parse_optimize_static {
   my $to_replace = $_[0];
   if (my ($optimization) = $to_replace =~ m|((?<=/cdn-cgi/image/)\w+=.*?(?=/))| ){
     $to_replace =~ s|$optimization\/||;
@@ -172,7 +209,7 @@ sub get_to_replace {
     }
   }
   if ($to_replace =~ m|((?<=/cdn-cgi/image/)\w+=.*?(?=/))| ) {
-    $to_replace = get_to_replace($to_replace, '&');
+    $to_replace = parse_optimize_static($to_replace, '&');
   }
   $to_replace =~ s|cdn-cgi/image/||;
   $to_replace =~ s|$s3_regex|$bunny|;
@@ -182,6 +219,9 @@ sub get_to_replace {
 sub parse_to_helper_function {
   my $url = $_[0];
   $url =~ s|\Q$bunny/||;
+  my ($file_name) = $url =~ m{(?<=/)([^/]*$|[^?]*)}g;
+  my ($bucket_name) = $url =~ m{.*(?=/)}g;
+
   if ($url =~ m{\?\w+?=}) {
     my ($options) = $url =~ m{(?<=\?)[^/]*$}g;
     $url =~ s|\?\Q${options}||g;
@@ -189,9 +229,9 @@ sub parse_to_helper_function {
       s|=|: |g;
       s|&|, |g;
     }
-    return "$helper_function_name(" . "'$url'" . ', {' . $options . '})'
+    return "$helper_function_name(" . "\"$bucket_name\", \"$file_name\"" . ", {" . $options . "})"
   } else {
-    return "$helper_function_name('$url')"
+    return "$helper_function_name(\"$bucket_name\", \"$file_name\")"
   }
 }
 
@@ -222,9 +262,12 @@ sub push_pair_to_arr {
 my $log_filename = $target_dir_relative_path;
 $log_filename =~ s/(.*\/)([\w|\-]*)/$2/;
 $log_filename = $log_filename . '.log';
-open(my $log_fh, ">", ${log_filename}) or die;
+open(my $log_fh, ">>", ${log_filename}) or die;
 my $gmt_time = gmtime();
+print $log_fh "//////////////////////////////////////////////////////\n";
 print $log_fh "GMT: ${gmt_time}\n";
+print $log_fh $is_write ? "Run mode: Write\n" : "Run mode: No Write\n";
+print $log_fh "//////////////////////////////////////////////////////\n";
 foreach (@log) {
   print $log_fh "$_\n";
 }
@@ -254,4 +297,3 @@ close($log_fh);
 
 
 
-exit 1;
