@@ -12,6 +12,7 @@ use Path::Tiny qw(path);
 
 
 my $s3_regex = 's3\.theasianparent\.com';
+my $bunny = 'static.cdntap.com';
 
 
 
@@ -39,20 +40,33 @@ while (my ($index, $item) = each @$quote_arr) {
 
 
 
-# foreach (@$quote_pair_arr) {
-#   print substr()
-#   print "$_->[0], ";
-#   print "$_->[1]\n";
-# }
+foreach (@$quote_pair_arr) {
+  my $first =  $_->[0];
+  my $second = $_->[1];
 
-my $first =  $quote_pair_arr->[87][0];
-my $second = $quote_pair_arr->[87][1];
-my $quote = substr($file_content, $first - 1, ($second - $first + 1));
-my @in_quote_matches = $quote =~ m{($s3_regex/.*?\w+\.{1}\w+\b)}g;
-say @in_quote_matches;
-
+  my $quote = substr($file_content, $first - 1, ($second - $first + 1));
+  my @in_quote_matches = $quote =~ m{($s3_regex/.*?\w+\.{1}\w+\b)}g;
+  foreach (@in_quote_matches) {
+    say parse_to_helper_function(get_to_replace($_));
+  }
+}
 
 
+sub parse_to_helper_function {
+  my $url = $_[0];
+  $url =~ s|\Q$bunny/||;
+  if ($url =~ m{\?\w+?=}) {
+    my ($options) = $url =~ m{(?<=\?)[^/]*$}g;
+    $url =~ s|\?\Q${options}||g;
+    foreach ($options) {
+      s|=|: |g;
+      s|&|, |g;
+    }
+    return 'helperFunction(' . "'$url" . ', {' . $options . '})'
+  } else {
+    return "helperFunction('$url')"
+  }
+}
 
 
 sub is_odd {
@@ -70,6 +84,24 @@ sub push_pair_to_array {
     my $temp_item = pop(@$temp);
     push(@$quote_pair_arr, [$temp_item, $_[1]]);
   }
+}
+
+sub get_to_replace {
+  my $to_replace = $_[0];
+  if (my ($optimization) = $to_replace =~ m|((?<=/cdn-cgi/image/)\w+=.*?(?=/))| ){
+    $to_replace =~ s|$optimization\/||;
+    if ($_[1]) {
+      $to_replace = $to_replace . $_[1] . $optimization;
+    } else {
+      $to_replace = $to_replace . '?' . $optimization;
+    }
+  }
+  if ($to_replace =~ m|((?<=/cdn-cgi/image/)\w+=.*?(?=/))| ) {
+    $to_replace = get_to_replace($to_replace, '&');
+  }
+  $to_replace =~ s|cdn-cgi/image/||;
+  $to_replace =~ s|$s3_regex|$bunny|;
+  return $to_replace
 }
 
 
