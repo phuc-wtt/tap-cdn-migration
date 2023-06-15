@@ -1,8 +1,5 @@
 #!/usr/bin/perl
 
-# NOTE
-# js: second round for non-file, ex: parenttown-prod/community-web/
-#
 # Flags
 use strict;
 use warnings;
@@ -15,7 +12,7 @@ use feature qw(say);
 use Path::Tiny qw(path);
 
 # Config vars
-my $is_write = 0;
+my $is_write = 1;
 my $exclude_dir = '(node_modules|\.git|build)';
 my $s3_regex = 's3\.theasianparent\.com';
 my $bunny = 'static.cdntap.com';
@@ -101,7 +98,7 @@ foreach (@js_entry) {
     my $quote = substr($file_content, $first - 1, ($second - $first + 1));
     my @in_quote_matches = $quote =~ m{($s3_regex/.*?\w+\.{1}\w+\b)}g;
     foreach (@in_quote_matches) {
-      my $to_replace = parse_to_helper_function(parse_optimize_static($_));
+      my $to_replace = parse_to_helper_function(parse_optimize_static($_)); ###########
       push_pair_to_arr($js_match_replace_pair, $temp, $_, undef);
       push_pair_to_arr($js_match_replace_pair, $temp, undef, $to_replace);
     }
@@ -117,12 +114,26 @@ foreach (@js_entry) {
     my $to_replace = $_->[1];
     push(@log, "[Match]:    $match");
     push(@log, "[Replace]:  $to_replace");
-    $js_file_content =~ s/\$\{("|')(https:\/\/)?\Q$match\E("|')\}/\$\{$to_replace\}/g;             # match ${"__"}
-    $js_file_content =~ s/(\?.*?:.*?)("|')(https:\/\/)?\Q$match\E("|')/$1$to_replace/g;      # match ternary
-    $js_file_content =~ s|(https://)?\Q$match\E|\$\{$to_replace\}|;             # match remain
+    # match ${"__"}
+    $js_file_content =~ s/\$\{("|')(https:\/\/)?\Q$match\E("|')\}/\$\{$to_replace\}/g;
+    # match ternary
+    $js_file_content =~ s/(\?.*?:.*?)("|')(https:\/\/)?\Q$match\E("|')/$1$to_replace/g;
+    # match remain
+    $js_file_content =~ s|(https://)?\Q$match\E|\$\{$to_replace\}|;
   }
-  # JS: replace static to helper funcj
+  # JS: replace static to helper func
   snr_js_static($js_file_content);
+
+  # Second round: s3/bucket
+  my @bucket_only_match = $js_file_content =~ m{(["'`].*?$s3_regex/.*?/["'`])}g;
+  foreach (@bucket_only_match) {
+    my ($match) = $_ =~ m{($s3_regex[^'"`]*)}g;
+    my $to_replace = parse_to_helper_function(parse_optimize_static($match), 1);
+    push(@log, "[Match]:    $match");
+    push(@log, "[Replace]:  $to_replace");
+    $js_file_content =~ s|["'`]?(https://)?\Q$match\E["'`]?|$to_replace|;
+  }
+
   if ($is_write) {$js_file->spew_utf8( $js_file_content );}
 
 }
@@ -171,7 +182,7 @@ sub snr_static {
 }
 
 sub snr_js_static { # copy from snr_static
-  # get all matches
+  # First round: s3.bucket/filename
   my @s3_match = $_[0] =~ m|($s3_regex/.*?\w+\.{1}\w+\b)|g;
   foreach my $match (@s3_match) {
     my $to_replace;
@@ -195,6 +206,7 @@ sub snr_js_static { # copy from snr_static
     $_[0] =~ s/:\s?("|'|`)(https:\/\/)?\Q$match\E("|'|`)/: $to_replace/g;
     $_[0] =~ s/return\s?("|'|`)(https:\/\/)?\Q$match\E("|'|`)/return $to_replace/g;
   }
+
   return $_[0]
 }
 
@@ -217,11 +229,18 @@ sub parse_optimize_static {
 }
 
 sub parse_to_helper_function {
+  # 0: url
+  # 1: is_bucket_only
   my $url = $_[0];
   $url =~ s|\Q$bunny/||;
+
+  if ($_[1]) {
+    return $helper_function_name . '("' . $url . '")';
+  }
+
   my ($file_name) = $url =~ m{(?<=/)([^/]*$|[^?]*)}g;
   my ($bucket_name) = $url =~ m{.*(?=/)}g;
-
+  
   if ($url =~ m{\?\w+?=}) {
     my ($options) = $url =~ m{(?<=\?)[^/]*$}g;
     $url =~ s|\?\Q${options}||g;
