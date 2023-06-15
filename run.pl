@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 
+#NOTE update helper_function_package
+
 # Flags
 use strict;
 use warnings;
@@ -17,9 +19,10 @@ my $exclude_dir = '(node_modules|\.git|build)';
 my $s3_regex = 's3\.theasianparent\.com';
 my $bunny = 'static.cdntap.com';
 my $target_dir_relative_path = '../community-web';
-my $helper_function_name = 'console.log';
+my $helper_function_name = 'generateAssetCdnUrl';
+my $helper_function_package = 'tobedefine';
 
-# Global varsj
+# Global vars
 my @all_entry;
 my @log;
 
@@ -134,12 +137,22 @@ foreach (@js_entry) {
     $js_file_content =~ s|["'`]?(https://)?\Q$match\E["'`]?|$to_replace|;
   }
 
+  $js_file_content =~ s|^|import { $helper_function_name } from $helper_function_package\;\n|;
+
   if ($is_write) {$js_file->spew_utf8( $js_file_content );}
 
 }
 
 
 # SCSS search/replace into mixin
+# TODO
+# foreach (@scss_entry) {
+#   push(@log, '', $_);
+#   my $file = path($_);
+#   my $file_content = $file->slurp_utf8;
+#   snr_scss($file_content);
+#   if ($is_write) {$file->spew_utf8( $file_content );}
+# };
 
 
 # HTML, JSON, CSS search/replace
@@ -147,6 +160,7 @@ my @static_entry = (
   @html_entry,
   @json_entry,
   @css_entry,
+  @scss_entry
 );
 foreach my $static_files (@static_entry) {
   foreach ($static_files) {
@@ -158,6 +172,31 @@ foreach my $static_files (@static_entry) {
   }
 };
 
+sub snr_scss { # TODO
+  # get all matches
+  my @s3_match = $_[0] =~ m{(\s?background(-image)?\s?:.*?url\(["|']?https://$s3_regex/.*?\w+\.{1}\w+\b)}g;
+  foreach my $match (@s3_match) {
+    my $to_replace;
+    # then check if optimized
+    if ($match =~ m|cdn-cgi/image/|) {
+      # optimized: process the matched
+      $to_replace = parse_optimize_static($match);
+      # snr matched to to_replace
+      $_[0] =~ s|$match|$to_replace|g;
+    } else {
+      $to_replace = $match;
+      $to_replace =~ s|$s3_regex|$bunny|;
+    }
+    push(@log, "[Match]:    $match");
+    push(@log, "[Replace]:  $to_replace");
+    $_[0] =~ s|(https://)?\Q$match|$1$to_replace|g;
+  }
+  return $_[0]
+}
+
+sub parse_optimize_scss {
+  # TODO
+}
 
 sub snr_static {
   # get all matches
@@ -314,5 +353,23 @@ close($log_fh);
 # close($log_fh);
 
 
-
-
+# SCSS
+# @mixin generateBackgroundImageCDN($bucket, $file-name, $optimize... ) {
+#     $optimize-string: "";
+#
+#     @for $i from 0 to length($optimize) {
+#         @if ($i ==0) {
+#             $optimize-string: "?"+#{$optimize-string};
+#         }
+#
+#         @else {
+#             $optimize-string: #{$optimize-string}+"&";
+#         }
+#
+#         $optimize-string: #{$optimize-string} + #{nth($optimize, $i + 1)};
+#     }
+#
+#     background: {
+#         iamge: url($bucket + $file-name + $optimize-string);
+#     }
+# }
