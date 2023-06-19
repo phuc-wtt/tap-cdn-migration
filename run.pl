@@ -14,13 +14,14 @@ use feature qw(say);
 use Path::Tiny qw(path);
 
 # Config vars
-my $is_write = 1;
+my $is_write = 0;
+my $is_log = 0;
 my $exclude_dir = '(node_modules|\.git|build)';
 my $s3_regex = 's3\.theasianparent\.com';
 my $bunny = 'static.cdntap.com';
-my $target_dir_relative_path = '../community-web';
+my $target_dir_relative_path = '../tap-iso-product-affiliate';
 my $helper_function_name = 'generateAssetCdnUrl';
-my $helper_function_package = 'tobedefine';
+my $helper_function_package = '@tickled-media/components.tm-helpers';
 
 # Global vars
 my @all_entry;
@@ -101,7 +102,7 @@ foreach (@js_entry) {
     my $quote = substr($file_content, $first - 1, ($second - $first + 1));
     my @in_quote_matches = $quote =~ m{($s3_regex/.*?\w+\.{1}\w+\b)}g;
     foreach (@in_quote_matches) {
-      my $to_replace = parse_to_helper_function(parse_optimize_static($_)); ###########
+      my $to_replace = parse_to_helper_function(parse_optimize_static($_));
       push_pair_to_arr($js_match_replace_pair, $temp, $_, undef);
       push_pair_to_arr($js_match_replace_pair, $temp, undef, $to_replace);
     }
@@ -137,7 +138,7 @@ foreach (@js_entry) {
     $js_file_content =~ s|["'`]?(https://)?\Q$match\E["'`]?|$to_replace|;
   }
 
-  $js_file_content =~ s|^|import { $helper_function_name } from $helper_function_package\;\n|;
+  $js_file_content =~ s|^|import { $helper_function_name } from '$helper_function_package'\;\n|;
 
   if ($is_write) {$js_file->spew_utf8( $js_file_content );}
 
@@ -153,7 +154,7 @@ foreach (@js_entry) {
 #   snr_scss($file_content);
 #   if ($is_write) {$file->spew_utf8( $file_content );}
 # };
-
+#
 
 # HTML, JSON, CSS search/replace
 my @static_entry = (
@@ -172,31 +173,32 @@ foreach my $static_files (@static_entry) {
   }
 };
 
-sub snr_scss { # TODO
-  # get all matches
-  my @s3_match = $_[0] =~ m{(\s?background(-image)?\s?:.*?url\(["|']?https://$s3_regex/.*?\w+\.{1}\w+\b)}g;
-  foreach my $match (@s3_match) {
-    my $to_replace;
-    # then check if optimized
-    if ($match =~ m|cdn-cgi/image/|) {
-      # optimized: process the matched
-      $to_replace = parse_optimize_static($match);
-      # snr matched to to_replace
-      $_[0] =~ s|$match|$to_replace|g;
-    } else {
-      $to_replace = $match;
-      $to_replace =~ s|$s3_regex|$bunny|;
-    }
-    push(@log, "[Match]:    $match");
-    push(@log, "[Replace]:  $to_replace");
-    $_[0] =~ s|(https://)?\Q$match|$1$to_replace|g;
-  }
-  return $_[0]
-}
-
-sub parse_optimize_scss {
-  # TODO
-}
+# sub snr_scss { # TODO
+#   # get all matches
+#   my (@s3_match) = $_[0] =~ m{(\s?background(?:-image)?\s?:\s?url\(["|'|`]?https://$s3_regex/[^\)]*?\w+\.{1}\w+\b["|'|`]?\)(?:\s+no-repeat)?\;)}g;
+#   foreach my $match (@s3_match) {
+#     my $to_replace;
+#     # trim match then check if optimized
+#     say $match;
+#     if ($match =~ m|cdn-cgi/image/|) {
+#       $to_replace = parse_optimize_scss($match);
+#     } else {
+#       
+#     }
+#     
+#
+#     # push(@log, "[Match]:    $match");
+#     # push(@log, "[Replace]:  $to_replace");
+#     #$_[0] =~ s|(https://)?\Q$match|$to_replace|g;
+#   }
+#   return $_[0]
+# }
+#
+# sub parse_optimize_scss {
+#   # TODO
+#     # my ($match_trimmed) = $match =~ m|($s3_regex/.*?\w+\.{1}\w+\b)|g;
+#       # @include$scss_helper_function(...)
+# }
 
 sub snr_static {
   # get all matches
@@ -277,7 +279,7 @@ sub parse_to_helper_function {
     return $helper_function_name . '("' . $url . '")';
   }
 
-  my ($file_name) = $url =~ m{(?<=/)([^/]*$|[^?]*)}g;
+  my ($file_name) = $url =~ m{[^/]*?(?=\?)|[^/?]*$}g;
   my ($bucket_name) = $url =~ m{.*(?=/)}g;
   
   if ($url =~ m{\?\w+?=}) {
@@ -317,19 +319,21 @@ sub push_pair_to_arr {
 
 
 # WRITE LOG
-my $log_filename = $target_dir_relative_path;
-$log_filename =~ s/(.*\/)([\w|\-]*)/$2/;
-$log_filename = $log_filename . '.log';
-open(my $log_fh, ">>", ${log_filename}) or die;
-my $gmt_time = gmtime();
-print $log_fh "//////////////////////////////////////////////////////\n";
-print $log_fh "GMT: ${gmt_time}\n";
-print $log_fh $is_write ? "Run mode: Write\n" : "Run mode: No Write\n";
-print $log_fh "//////////////////////////////////////////////////////\n";
-foreach (@log) {
-  print $log_fh "$_\n";
+if ($is_log) {
+  my $log_filename = $target_dir_relative_path;
+  $log_filename =~ s/(.*\/)([\w|\-]*)/$2/;
+  $log_filename = $log_filename . '.log';
+  open(my $log_fh, ">>", ${log_filename}) or die;
+  my $gmt_time = gmtime();
+  print $log_fh "//////////////////////////////////////////////////////\n";
+  print $log_fh "GMT: ${gmt_time}\n";
+  print $log_fh $is_write ? "Run mode: Write\n" : "Run mode: No Write\n";
+  print $log_fh "//////////////////////////////////////////////////////\n";
+  foreach (@log) {
+    print $log_fh "$_\n";
+  }
+  close($log_fh);
 }
-close($log_fh);
 
 
 
