@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 
-#NOTE update helper_function_package
+#NOTE generateAssetCdnUrl\("[^"]*?"\) when update new helper_function_package
+#NOTE import SCSS
+#NOTE SCSS helper func not handling cdn-cgi yet
 
 # Flags
 use strict;
@@ -19,9 +21,10 @@ my $is_log = 0;
 my $exclude_dir = '(node_modules|\.git|build)';
 my $s3_regex = 's3\.theasianparent\.com';
 my $bunny = 'static.cdntap.com';
-my $target_dir_relative_path = '../tap-iso-product-affiliate';
 my $helper_function_name = 'generateAssetCdnUrl';
-my $helper_function_package = '@tickled-media/components.tm-helpers';
+my $scss_helper_function_name = 'generateAssetCdnUrlScss';
+my $target_dir_relative_path = '../tap-iso-other';
+my $helper_function_package = '@tickled-media/components.tm-helper-generate-asset-cdn-url';
 
 # Global vars
 my @all_entry;
@@ -34,6 +37,10 @@ find(
       return;
     }
       if (-f _) {
+        if (m{\.min\.}o) {
+          return;
+        }
+
         open(my $fh, "<", $_) or die;
         while (<$fh>) {
           if (/$s3_regex/) {
@@ -138,23 +145,22 @@ foreach (@js_entry) {
     $js_file_content =~ s|["'`]?(https://)?\Q$match\E["'`]?|$to_replace|;
   }
 
-  $js_file_content =~ s|^|import { $helper_function_name } from '$helper_function_package'\;\n|;
+  $js_file_content =~ s|^|import $helper_function_name from '$helper_function_package'\;\n|;
 
   if ($is_write) {$js_file->spew_utf8( $js_file_content );}
-
 }
 
 
 # SCSS search/replace into mixin
 # TODO
-# foreach (@scss_entry) {
-#   push(@log, '', $_);
-#   my $file = path($_);
-#   my $file_content = $file->slurp_utf8;
-#   snr_scss($file_content);
-#   if ($is_write) {$file->spew_utf8( $file_content );}
-# };
-#
+foreach (@scss_entry) {
+  push(@log, '', $_);
+  my $file = path($_);
+  my $file_content = $file->slurp_utf8;
+  snr_scss($file_content);
+  if ($is_write) {$file->spew_utf8( $file_content );}
+};
+
 
 # HTML, JSON, CSS search/replace
 my @static_entry = (
@@ -173,32 +179,41 @@ foreach my $static_files (@static_entry) {
   }
 };
 
-# sub snr_scss { # TODO
-#   # get all matches
-#   my (@s3_match) = $_[0] =~ m{(\s?background(?:-image)?\s?:\s?url\(["|'|`]?https://$s3_regex/[^\)]*?\w+\.{1}\w+\b["|'|`]?\)(?:\s+no-repeat)?\;)}g;
-#   foreach my $match (@s3_match) {
-#     my $to_replace;
-#     # trim match then check if optimized
-#     say $match;
-#     if ($match =~ m|cdn-cgi/image/|) {
-#       $to_replace = parse_optimize_scss($match);
-#     } else {
-#       
-#     }
-#     
-#
-#     # push(@log, "[Match]:    $match");
-#     # push(@log, "[Replace]:  $to_replace");
-#     #$_[0] =~ s|(https://)?\Q$match|$to_replace|g;
-#   }
-#   return $_[0]
-# }
-#
-# sub parse_optimize_scss {
-#   # TODO
-#     # my ($match_trimmed) = $match =~ m|($s3_regex/.*?\w+\.{1}\w+\b)|g;
-#       # @include$scss_helper_function(...)
-# }
+sub snr_scss { # TODO
+  # get all matches
+  # my (@s3_match) = $_[0] =~ m{(\s?background(?:-image)?\s?:\s?url\(["|'|`]?https://$s3_regex/[^\)]*?\w+\.{1}\w+\b["|'|`]?\)(?:\s+no-repeat)?\;)}g;
+  my (@s3_match) = $_[0] =~ m{(?:'|"|`)?(?:https:)?(?://)?$s3_regex/.*\.\w+(?:'|"|`)?}g;
+  foreach my $match (@s3_match) {
+    my $to_replace;
+    # trim match then check if optimized
+    my ($file_path) = $match =~ m{(?<=$s3_regex/).*\.\w+}g;
+    if ($file_path) {
+      if ($match =~ m|cdn-cgi/image/|) {
+        $to_replace = parse_optimize_scss($match);
+      } else {
+        my ($folder_path) = $file_path =~ m{.*(?=/)}g;
+        my ($file_name) = $file_path =~ m{(?<=/).*\.\w+}g;
+        $to_replace = $scss_helper_function_name . '(' . $folder_path . ', ' . $file_name . ')';
+        say $to_replace;
+      }
+    } else {
+      say "Scss: something went wrong"
+    }
+
+
+    # push(@log, "[Match]:    $match");
+    # push(@log, "[Replace]:  $to_replace");
+    $_[0] =~ s|\Q$match\E|$to_replace|g;
+  }
+  return $_[0]
+}
+
+sub parse_optimize_scss {
+  my $input = $_[0];
+  $input =~ s|['"`]||g;
+  $input =~ s|^.*?/cdn-cgi/image/||g;
+  say $input;
+}
 
 sub snr_static {
   # get all matches
@@ -377,3 +392,30 @@ if ($is_log) {
 #         iamge: url($bucket + $file-name + $optimize-string);
 #     }
 # }
+#
+#
+#
+#
+#
+#
+# (?:\()(?:"|'|`)(?:https://)static.cdntap.com/([^\)]*?)(?:"|'|`)\)
+# (generateAssetCdnUrlScss("$1"))
+#
+# generateAssetCdnUrlScss\("(.*)/(.*)"\)
+# generateAssetCdnUrlScss("$1",  "$2")
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
